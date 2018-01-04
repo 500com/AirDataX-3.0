@@ -30,7 +30,11 @@ public class PostgresqlWriter extends Writer {
 			}
 
 			this.commonRdbmsWriterMaster = new CommonRdbmsWriter.Job(DATABASE_TYPE);
-			this.commonRdbmsWriterMaster.init(this.originalConfig);
+			//this.commonRdbmsWriterMaster.init(this.originalConfig);
+            if(this.originalConfig.getBool("autoCreateTable",true) == true)
+                this.commonRdbmsWriterMaster.init(this.originalConfig,super.getPeerPluginJobConf(),super.getPeerPluginName());
+            else
+                this.commonRdbmsWriterMaster.init(this.originalConfig);
 		}
 
 		@Override

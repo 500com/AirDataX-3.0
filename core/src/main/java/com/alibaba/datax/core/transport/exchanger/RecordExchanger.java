@@ -42,6 +42,8 @@ public class RecordExchanger extends TransformerExchanger implements RecordSende
 
 	private volatile boolean shutdown = false;
 
+    private Configuration metaConf;
+
 	@SuppressWarnings("unchecked")
 	public RecordExchanger(final int taskGroupId, final int taskId,final Channel channel, final Communication communication,List<TransformerExecution> transformerExecs, final TaskPluginCollector pluginCollector) {
 		super(taskGroupId,taskId,communication,transformerExecs, pluginCollector);
@@ -59,7 +61,12 @@ public class RecordExchanger extends TransformerExchanger implements RecordSende
 		}
 	}
 
-	@Override
+    @Override
+    public Configuration getMetaConf() {
+        return this.metaConf;
+    }
+
+    @Override
 	public Record getFromReader() {
 		if(shutdown){
 			throw DataXException.asDataXException(CommonErrorCode.SHUT_DOWN_TASK, "");
@@ -110,4 +117,9 @@ public class RecordExchanger extends TransformerExchanger implements RecordSende
 	public void shutdown(){
 		shutdown = true;
 	}
+
+    @Override
+    public void setMetaConf(Configuration metaConf) {
+        this.metaConf = metaConf;
+    }
 }

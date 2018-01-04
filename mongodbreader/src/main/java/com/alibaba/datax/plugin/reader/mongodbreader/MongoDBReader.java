@@ -1,6 +1,7 @@
 package com.alibaba.datax.plugin.reader.mongodbreader;
 import com.alibaba.datax.common.element.*;
 import com.alibaba.datax.common.exception.DataXException;
+import com.alibaba.datax.common.plugin.JobPluginCollector;
 import com.alibaba.datax.common.plugin.RecordSender;
 import com.alibaba.datax.common.spi.Reader;
 import com.alibaba.datax.common.util.Configuration;
@@ -24,6 +25,7 @@ import java.util.*;
 public class MongoDBReader extends Reader {
 
     public static class Job extends Reader.Job {
+
 
         private Configuration originalConfig = null;
 

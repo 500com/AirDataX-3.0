@@ -44,6 +44,9 @@ public abstract class Reader extends BaseObject {
 		 * 
 		 * */
 		public abstract List<Configuration> split(int adviceNumber);
+
+
+
 	}
 
 	public static abstract class Task extends AbstractTaskPlugin {

@@ -19,6 +19,7 @@ import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream;
 import org.apache.commons.io.Charsets;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.net.util.Base64;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -270,6 +271,9 @@ public class UnstructuredStorageWriterUtil {
         char fieldDelimiter = config.getChar(Key.FIELD_DELIMITER,
                 Constant.DEFAULT_FIELD_DELIMITER);
 
+        boolean isBase64Encode = config.getBool(Key.BASE64_ENCODING,
+                Constant.BASE64_ENCODING);
+
         UnstructuredWriter unstructuredWriter = TextCsvWriterManager
                 .produceUnstructuredWriter(fileFormat, fieldDelimiter, writer);
 
@@ -279,10 +283,18 @@ public class UnstructuredStorageWriterUtil {
         }
 
         Record record = null;
-        while ((record = lineReceiver.getFromReader()) != null) {
-            UnstructuredStorageWriterUtil.transportOneRecord(record,
-                    nullFormat, dateParse, taskPluginCollector,
-                    unstructuredWriter);
+        if(!isBase64Encode) {
+            while ((record = lineReceiver.getFromReader()) != null) {
+                UnstructuredStorageWriterUtil.transportOneRecord(record,
+                        nullFormat, dateParse, taskPluginCollector,
+                        unstructuredWriter);
+            }
+        }else {
+            while ((record = lineReceiver.getFromReader()) != null) {
+                UnstructuredStorageWriterUtil.transportOneRecordInBase64(record,
+                        nullFormat, dateParse, taskPluginCollector,
+                        unstructuredWriter);
+            }
         }
 
         // warn:由调用方控制流的关闭
@@ -316,6 +328,46 @@ public class UnstructuredStorageWriterUtil {
                                         .asDate()));
                             } else {
                                 splitedRows.add(column.asString());
+                            }
+                        }
+                    } else {
+                        // warn: it's all ok if nullFormat is null
+                        splitedRows.add(nullFormat);
+                    }
+                }
+            }
+            unstructuredWriter.writeOneRecord(splitedRows);
+        } catch (Exception e) {
+            // warn: dirty data
+            taskPluginCollector.collectDirtyRecord(record, e);
+        }
+    }
+
+
+    public static void transportOneRecordInBase64(Record record, String nullFormat,
+                                          DateFormat dateParse, TaskPluginCollector taskPluginCollector,
+                                          UnstructuredWriter unstructuredWriter) {
+        // warn: default is null
+        if (null == nullFormat) {
+            nullFormat = Base64.encodeBase64String("null".getBytes());
+        }
+        try {
+            List<String> splitedRows = new ArrayList<String>();
+            int recordLength = record.getColumnNumber();
+            if (0 != recordLength) {
+                Column column;
+                for (int i = 0; i < recordLength; i++) {
+                    column = record.getColumn(i);
+                    if (null != column.getRawData()) {
+                        boolean isDateColumn = column instanceof DateColumn;
+                        if (!isDateColumn) {
+                            splitedRows.add(Base64.encodeBase64String(column.asString().getBytes("utf8")));
+                        } else {
+                            if (null != dateParse) {
+                                splitedRows.add(Base64.encodeBase64String(dateParse.format(column
+                                        .asDate()).getBytes("utf8")));
+                            } else {
+                                splitedRows.add(Base64.encodeBase64String(column.asString().getBytes("utf8")));
                             }
                         }
                     } else {

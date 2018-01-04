@@ -10,4 +10,7 @@ public class Constant {
 	public static final String DEFAULT_NULL_FORMAT = "\\N";
 	
     public static final Integer DEFAULT_BUFFER_SIZE = 8192;
+
+    // add by sunwq ,用于非结构化writer是否进行base64编码，用于规避特殊字符
+    public static final boolean BASE64_ENCODING = false;
 }

@@ -37,4 +37,6 @@ public final class Key {
     public final static String TABLE_RULE = "tableRule";
 
     public final static String DRYRUN = "dryRun";
+
+    public final static String AUTO_CREATE_TABLE = "autoCreateTable";
 }

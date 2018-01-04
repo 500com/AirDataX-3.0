@@ -38,6 +38,14 @@ public  class HdfsHelper {
     private String  kerberosKeytabFilePath;
     private String  kerberosPrincipal;
 
+
+    //Text格式下 字段中的换行是不是替换为空格
+    private static String NEW_LINE_REPLACE = null;
+
+    public static void getNewLineReplace(Configuration taskConfig) {
+        NEW_LINE_REPLACE = taskConfig.getString("newLineReplace");
+    }
+
     public void getFileSystem(String defaultFS, Configuration taskConfig){
         hadoopConf = new org.apache.hadoop.conf.Configuration();
         hadoopConf.set("fs.defaultFS", defaultFS);
@@ -189,6 +197,18 @@ public  class HdfsHelper {
             throw DataXException.asDataXException(HdfsWriterErrorCode.CONNECT_HDFS_IO_ERROR, e);
         }
         LOG.info(String.format("finish delete tmp dir [%s] .",path.toString()));
+    }
+
+    /**
+     * 未检查path的安全性
+     * @param path 需要建立目录的路径
+     */
+    public void createDir(String path) {
+        try {
+            fileSystem.mkdirs(new Path(path));
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     public void renameFile(HashSet<String> tmpFiles, HashSet<String> endFiles){
@@ -505,7 +525,10 @@ public  class HdfsHelper {
                             case STRING:
                             case VARCHAR:
                             case CHAR:
-                                recordList.add(column.asString());
+                                if(NEW_LINE_REPLACE==null)
+                                    recordList.add(column.asString());
+                                else
+                                    recordList.add(column.asString().replaceAll("\\n",NEW_LINE_REPLACE));
                                 break;
                             case BOOLEAN:
                                 recordList.add(column.asBoolean());

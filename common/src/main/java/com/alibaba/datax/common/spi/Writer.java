@@ -3,6 +3,7 @@ package com.alibaba.datax.common.spi;
 import com.alibaba.datax.common.base.BaseObject;
 import com.alibaba.datax.common.plugin.AbstractJobPlugin;
 import com.alibaba.datax.common.plugin.AbstractTaskPlugin;
+import com.alibaba.datax.common.plugin.JobPluginCollector;
 import com.alibaba.datax.common.util.Configuration;
 import com.alibaba.datax.common.plugin.RecordReceiver;
 
@@ -26,7 +27,8 @@ public abstract class Writer extends BaseObject {
 		 * 
 		 * */
 		public abstract List<Configuration> split(int mandatoryNumber);
-	}
+
+    }
 
 	/**
 	 * 每个Writer插件必须实现Task内部类

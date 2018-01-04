@@ -1,6 +1,7 @@
 package com.alibaba.datax.plugin.rdbms.util;
 
 import com.alibaba.datax.common.exception.DataXException;
+import com.alibaba.datax.common.spi.ErrorCode;
 
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -18,7 +19,8 @@ public enum DataBaseType {
     PostgreSQL("postgresql", "org.postgresql.Driver"),
     RDBMS("rdbms", "com.alibaba.datax.plugin.rdbms.util.DataBaseType"),
     DB2("db2", "com.ibm.db2.jcc.DB2Driver"),
-    ADS("ads","com.mysql.jdbc.Driver");
+    ADS("ads","com.mysql.jdbc.Driver"),
+    Hive("hive","org.apache.hive.jdbc.HiveDriver");
 
 
     private String typeName;
@@ -56,6 +58,8 @@ public enum DataBaseType {
             	break;
             case RDBMS:
                 break;
+            case Hive:
+                break;
             default:
                 throw DataXException.asDataXException(DBUtilErrorCode.UNSUPPORTED_TYPE, "unsupported database type.");
         }
@@ -92,6 +96,8 @@ public enum DataBaseType {
             case PostgreSQL:
             	break;
             case RDBMS:
+                break;
+            case Hive:
                 break;
             default:
                 throw DataXException.asDataXException(DBUtilErrorCode.UNSUPPORTED_TYPE, "unsupported database type.");
@@ -187,6 +193,19 @@ public enum DataBaseType {
         }
         return null;
     }
+
+    public static DataBaseType getDataBaseType(String typeName) {
+        if(typeName==null)
+            throw RdbmsException.asDataXException(DBUtilErrorCode.ILLEGAL_VALUE, "type name is null");
+        if(typeName.endsWith("writer") || typeName.endsWith("reader"))
+            typeName = typeName.substring(0,typeName.length()-6);
+        for(DataBaseType t:DataBaseType.values()) {
+            if(t.getTypeName().equalsIgnoreCase(typeName.toLowerCase()))
+                return t;
+        }
+        throw RdbmsException.asDataXException(DBUtilErrorCode.UNSUPPORTED_TYPE, "no suitable rdbms database type for plugin");
+    }
+
     public String getTypeName() {
         return typeName;
     }

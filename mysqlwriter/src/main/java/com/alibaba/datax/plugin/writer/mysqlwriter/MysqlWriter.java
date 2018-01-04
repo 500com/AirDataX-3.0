@@ -1,12 +1,18 @@
 package com.alibaba.datax.plugin.writer.mysqlwriter;
 
+import com.alibaba.datax.common.constant.PluginType;
 import com.alibaba.datax.common.plugin.RecordReceiver;
 import com.alibaba.datax.common.spi.Writer;
 import com.alibaba.datax.common.util.Configuration;
+
+import com.alibaba.datax.core.util.container.ClassLoaderSwapper;
+import com.alibaba.datax.core.util.container.LoadUtil;
+import com.alibaba.datax.plugin.rdbms.util.DBUtil;
 import com.alibaba.datax.plugin.rdbms.util.DataBaseType;
 import com.alibaba.datax.plugin.rdbms.writer.CommonRdbmsWriter;
 import com.alibaba.datax.plugin.rdbms.writer.Key;
 
+import java.net.URL;
 import java.util.List;
 
 
@@ -16,6 +22,7 @@ public class MysqlWriter extends Writer {
 
     public static class Job extends Writer.Job {
         private Configuration originalConfig = null;
+
         private CommonRdbmsWriter.Job commonRdbmsWriterJob;
 
         @Override
@@ -27,8 +34,17 @@ public class MysqlWriter extends Writer {
         @Override
         public void init() {
             this.originalConfig = super.getPluginJobConf();
+
             this.commonRdbmsWriterJob = new CommonRdbmsWriter.Job(DATABASE_TYPE);
-            this.commonRdbmsWriterJob.init(this.originalConfig);
+
+            if(this.originalConfig.getBool("autoCreateTable",true) == true)
+                this.commonRdbmsWriterJob.init(this.originalConfig,super.getPeerPluginJobConf(),super.getPeerPluginName());
+            else
+                this.commonRdbmsWriterJob.init(this.originalConfig);
+
+            //System.out.println("srcConf:"+this.peerConfig.toString());
+
+            //this.commonRdbmsWriterJob.tryCreateDestTable(this.originalConfig,DATABASE_TYPE,this.peerConfig,super.getPeerPluginName());
         }
 
         // 一般来说，是需要推迟到 task 中进行pre 的执行（单表情况例外）

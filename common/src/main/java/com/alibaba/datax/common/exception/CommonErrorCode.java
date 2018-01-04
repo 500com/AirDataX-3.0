@@ -15,7 +15,8 @@ public enum CommonErrorCode implements ErrorCode {
     HOOK_INTERNAL_ERROR("Common-12", "Hook运行错误 ."),
     SHUT_DOWN_TASK("Common-20", "Task收到了shutdown指令，为failover做准备"),
     WAIT_TIME_EXCEED("Common-21", "等待时间超出范围"),
-    TASK_HUNG_EXPIRED("Common-22", "任务hung住，Expired");
+    TASK_HUNG_EXPIRED("Common-22", "任务hung住，Expired"),
+    DECRYPT_ERROR("Common-23", "DataX解密异常");
 
     private final String code;
 

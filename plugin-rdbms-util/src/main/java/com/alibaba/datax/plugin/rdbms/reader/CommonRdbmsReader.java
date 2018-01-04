@@ -27,13 +27,8 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.ResultSetMetaData;
-import java.sql.Types;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
+import java.sql.*;
+import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -57,6 +52,8 @@ public class CommonRdbmsReader {
             LOG.debug("After job init(), job config now is:[\n{}\n]",
                     originalConfig.toJSON());
         }
+
+
 
         public void preCheck(Configuration originalConfig,DataBaseType dataBaseType) {
             /*检查每个表是否有读权限，以及querySql跟splik Key是否正确*/
@@ -181,26 +178,47 @@ public class CommonRdbmsReader {
                     querySql, basicMsg);
             PerfRecord queryPerfRecord = new PerfRecord(taskGroupId,taskId, PerfRecord.PHASE.SQL_QUERY);
             queryPerfRecord.start();
+            LOG.info("queryPerfRecord.start");
+
 
             Connection conn = DBUtil.getConnection(this.dataBaseType, jdbcUrl,
                     username, password);
+            LOG.info("DBUtil.getConnection");
+
 
             // session config .etc related
             DBUtil.dealWithSessionConfig(conn, readerSliceConfig,
                     this.dataBaseType, basicMsg);
+            LOG.info("dealWithSessionConfig");
 
             int columnNumber = 0;
             ResultSet rs = null;
+            Statement stmt = null;
             try {
-                rs = DBUtil.query(conn, querySql, fetchSize);
+
+
+
+                conn.setAutoCommit(false);
+                stmt = conn.createStatement(ResultSet.TYPE_FORWARD_ONLY,
+                        ResultSet.CONCUR_READ_ONLY);
+                stmt.setFetchSize(fetchSize);
+                rs = DBUtil.query(stmt, querySql);
+                LOG.info("DBUtil.query");
+
                 queryPerfRecord.end();
+                LOG.info("queryPerfRecord.end");
 
                 ResultSetMetaData metaData = rs.getMetaData();
+                LOG.info("rs.getMetaData();");
+
                 columnNumber = metaData.getColumnCount();
+                LOG.info("metaData.getColumnCount");
 
                 //这个统计干净的result_Next时间
                 PerfRecord allResultPerfRecord = new PerfRecord(taskGroupId, taskId, PerfRecord.PHASE.RESULT_NEXT_ALL);
                 allResultPerfRecord.start();
+
+                LOG.info("allResultPerfRecord.start");
 
                 long rsNextUsedTime = 0;
                 long lastTime = System.nanoTime();
@@ -210,6 +228,7 @@ public class CommonRdbmsReader {
                             metaData, columnNumber, mandatoryEncoding, taskPluginCollector);
                     lastTime = System.nanoTime();
                 }
+                LOG.info("transportOneRecord");
 
                 allResultPerfRecord.end(rsNextUsedTime);
                 //目前大盘是依赖这个打印，而之前这个Finish read record是包含了sql查询和result next的全部时间
@@ -217,10 +236,12 @@ public class CommonRdbmsReader {
                         querySql, basicMsg);
 
             }catch (Exception e) {
+                e.printStackTrace();
                 throw RdbmsException.asQueryException(this.dataBaseType, e, querySql, table, username);
             } finally {
-                DBUtil.closeDBResources(null, conn);
+                DBUtil.closeDBResources(rs,stmt,conn);
             }
+
         }
 
         public void post(Configuration originalConfig) {
@@ -241,6 +262,7 @@ public class CommonRdbmsReader {
         protected Record buildRecord(RecordSender recordSender,ResultSet rs, ResultSetMetaData metaData, int columnNumber, String mandatoryEncoding,
         		TaskPluginCollector taskPluginCollector) {
         	Record record = recordSender.createRecord();
+
 
             try {
                 for (int i = 1; i <= columnNumber; i++) {

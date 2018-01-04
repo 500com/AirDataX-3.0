@@ -1,0 +1,10 @@
+{
+  "name": "extxtfilewriter",
+  "parameter": {
+    "path": "",
+    "fileName": "",
+    "writeMode": "",
+    "fieldDelimiter": "",
+    "dateFormat": ""
+  }
+}

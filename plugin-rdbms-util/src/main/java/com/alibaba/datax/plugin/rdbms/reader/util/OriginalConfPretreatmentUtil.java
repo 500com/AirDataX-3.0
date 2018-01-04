@@ -89,6 +89,7 @@ public final class OriginalConfPretreatmentUtil {
                 jdbcUrl = DBUtil.chooseJdbcUrlWithoutRetry(DATABASE_TYPE, jdbcUrls,
                         username, password, preSql, checkSlave);
             } else {
+
                 jdbcUrl = DBUtil.chooseJdbcUrl(DATABASE_TYPE, jdbcUrls,
                         username, password, preSql, checkSlave);
             }
@@ -149,6 +150,7 @@ public final class OriginalConfPretreatmentUtil {
                 } else {
                     String jdbcUrl = originalConfig.getString(String.format(
                             "%s[0].%s", Constant.CONN_MARK, Key.JDBC_URL));
+
 
                     String username = originalConfig.getString(Key.USERNAME);
                     String password = originalConfig.getString(Key.PASSWORD);

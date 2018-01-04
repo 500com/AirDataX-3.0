@@ -17,6 +17,7 @@
 package com.alibaba.datax.common.plugin;
 
 import com.alibaba.datax.common.element.Record;
+import com.alibaba.datax.common.util.Configuration;
 
 public interface RecordSender {
 
@@ -29,4 +30,6 @@ public interface RecordSender {
 	public void terminate();
 
 	public void shutdown();
+
+    public void setMetaConf(Configuration metaConf);
 }

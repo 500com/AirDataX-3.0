@@ -39,6 +39,8 @@ public class BufferedRecordTransformerExchanger extends TransformerExchanger imp
 
     private volatile boolean shutdown = false;
 
+    private Configuration metaConf ;
+
 
     @SuppressWarnings("unchecked")
     public BufferedRecordTransformerExchanger(final int taskGroupId, final int taskId,
@@ -133,6 +135,11 @@ public class BufferedRecordTransformerExchanger extends TransformerExchanger imp
     }
 
     @Override
+    public Configuration getMetaConf() {
+        return this.metaConf;
+    }
+
+    @Override
     public Record getFromReader() {
         if (shutdown) {
             throw DataXException.asDataXException(CommonErrorCode.SHUT_DOWN_TASK, "");
@@ -158,6 +165,11 @@ public class BufferedRecordTransformerExchanger extends TransformerExchanger imp
         } catch (Throwable t) {
             t.printStackTrace();
         }
+    }
+
+    @Override
+    public void setMetaConf(Configuration metaConf) {
+        this.metaConf = metaConf;
     }
 
     private void receive() {

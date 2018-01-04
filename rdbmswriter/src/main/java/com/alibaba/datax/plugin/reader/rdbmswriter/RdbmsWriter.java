@@ -35,7 +35,10 @@ public class RdbmsWriter extends Writer {
 
             this.commonRdbmsWriterMaster = new SubCommonRdbmsWriter.Job(
                     DATABASE_TYPE);
-            this.commonRdbmsWriterMaster.init(this.originalConfig);
+            if(this.originalConfig.getBool("autoCreateTable",true) == true)
+                this.commonRdbmsWriterMaster.init(this.originalConfig,super.getPeerPluginJobConf(),super.getPeerPluginName());
+            else
+                this.commonRdbmsWriterMaster.init(this.originalConfig);
         }
 
         @Override

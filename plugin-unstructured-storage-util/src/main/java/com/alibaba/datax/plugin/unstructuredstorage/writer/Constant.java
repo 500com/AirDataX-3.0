@@ -16,4 +16,7 @@ public class Constant {
 	public static final Long MAX_FILE_SIZE = 1024 * 1024 * 10 * 10000L;
 	
 	public static final String DEFAULT_SUFFIX = "";
+
+    // add by sunwq ,用于非结构化writer是否进行base64编码，用于规避特殊字符
+    public static final boolean BASE64_ENCODING = false;
 }

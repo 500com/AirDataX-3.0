@@ -28,4 +28,7 @@ public class Key {
 
 	public static final String CSV_READER_CONFIG = "csvReaderConfig";
 
+    // add by sunwq ,用于非结构化是否进行base64编码，用于规避特殊字符
+    public static final String BASE64_ENCODING = "isBase64Encode";
+
 }

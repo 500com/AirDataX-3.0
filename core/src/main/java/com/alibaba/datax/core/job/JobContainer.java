@@ -82,6 +82,10 @@ public class JobContainer extends AbstractContainer {
 
     private ErrorRecordChecker errorLimit;
 
+    private Configuration readerConf;
+
+    private Configuration writerConf;
+
     public JobContainer(Configuration configuration) {
         super(configuration);
 
@@ -299,6 +303,13 @@ public class JobContainer extends AbstractContainer {
 
         JobPluginCollector jobPluginCollector = new DefaultJobPluginCollector(
                 this.getContainerCommunicator());
+
+        this.readerConf = this.configuration.getConfiguration(
+                CoreConstant.DATAX_JOB_CONTENT_READER_PARAMETER);
+
+        this.writerConf = this.configuration.getConfiguration(
+                CoreConstant.DATAX_JOB_CONTENT_WRITER_PARAMETER);
+
         //必须先Reader ，后Writer
         this.jobReader = this.initJobReader(jobPluginCollector);
         this.jobWriter = this.initJobWriter(jobPluginCollector);
@@ -662,13 +673,15 @@ public class JobContainer extends AbstractContainer {
                 PluginType.READER, this.readerPluginName);
 
         // 设置reader的jobConfig
-        jobReader.setPluginJobConf(this.configuration.getConfiguration(
-                CoreConstant.DATAX_JOB_CONTENT_READER_PARAMETER));
+        jobReader.setPluginJobConf(this.readerConf);
+
+        //jobReader.setPluginJobConf(this.configuration.getConfiguration(
+        //        CoreConstant.DATAX_JOB_CONTENT_READER_PARAMETER));
 
         // 设置reader的readerConfig
-        jobReader.setPeerPluginJobConf(this.configuration.getConfiguration(
-                CoreConstant.DATAX_JOB_CONTENT_WRITER_PARAMETER));
-
+        //jobReader.setPeerPluginJobConf(this.configuration.getConfiguration(
+        //        CoreConstant.DATAX_JOB_CONTENT_WRITER_PARAMETER));
+        jobReader.setPeerPluginJobConf(this.writerConf);
         jobReader.setJobPluginCollector(jobPluginCollector);
         jobReader.init();
 
@@ -692,12 +705,13 @@ public class JobContainer extends AbstractContainer {
                 PluginType.WRITER, this.writerPluginName);
 
         // 设置writer的jobConfig
-        jobWriter.setPluginJobConf(this.configuration.getConfiguration(
-                CoreConstant.DATAX_JOB_CONTENT_WRITER_PARAMETER));
-
+        //jobWriter.setPluginJobConf(this.configuration.getConfiguration(
+        //        CoreConstant.DATAX_JOB_CONTENT_WRITER_PARAMETER));
+        jobWriter.setPluginJobConf(this.writerConf);
         // 设置reader的readerConfig
-        jobWriter.setPeerPluginJobConf(this.configuration.getConfiguration(
-                CoreConstant.DATAX_JOB_CONTENT_READER_PARAMETER));
+        //jobWriter.setPeerPluginJobConf(this.configuration.getConfiguration(
+        //        CoreConstant.DATAX_JOB_CONTENT_READER_PARAMETER));
+        jobWriter.setPeerPluginJobConf(this.readerConf);
 
         jobWriter.setPeerPluginName(this.readerPluginName);
         jobWriter.setJobPluginCollector(jobPluginCollector);

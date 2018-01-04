@@ -14,6 +14,8 @@ import com.alibaba.datax.plugin.rdbms.writer.util.OriginalConfPretreatmentUtil;
 import com.alibaba.datax.plugin.rdbms.writer.util.WriterUtil;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Triple;
+import org.postgresql.PGConnection;
+import org.postgresql.copy.CopyManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,6 +37,14 @@ public class CommonRdbmsWriter {
         public Job(DataBaseType dataBaseType) {
             this.dataBaseType = dataBaseType;
             OriginalConfPretreatmentUtil.DATABASE_TYPE = this.dataBaseType;
+        }
+
+
+        public void init(Configuration originalConfig,Configuration peerConfig,String peerPluginName) {
+            OriginalConfPretreatmentUtil.doPretreatment(originalConfig, this.dataBaseType, peerConfig, peerPluginName);
+
+            LOG.debug("After job init(), originalConfig now is:[\n{}\n]",
+                    originalConfig.toJSON());
         }
 
         public void init(Configuration originalConfig) {
@@ -234,8 +244,17 @@ public class CommonRdbmsWriter {
 
             writeMode = writerSliceConfig.getString(Key.WRITE_MODE, "INSERT");
             emptyAsNull = writerSliceConfig.getBool(Key.EMPTY_AS_NULL, true);
-            INSERT_OR_REPLACE_TEMPLATE = writerSliceConfig.getString(Constant.INSERT_OR_REPLACE_TEMPLATE_MARK);
-            this.writeRecordSql = String.format(INSERT_OR_REPLACE_TEMPLATE, this.table);
+
+
+            switch(this.dataBaseType){
+                case PostgreSQL:
+                    this.writeRecordSql =  "COPY " + this.table + " FROM STDIN WITH  DELIMITER '\001' ";
+                    break;
+                default:
+                    INSERT_OR_REPLACE_TEMPLATE = writerSliceConfig.getString(Constant.INSERT_OR_REPLACE_TEMPLATE_MARK);
+                    this.writeRecordSql = String.format(INSERT_OR_REPLACE_TEMPLATE, this.table);
+                    break;
+            }
 
             BASIC_MESSAGE = String.format("jdbcUrl:[%s], table:[%s]",
                     this.jdbcUrl, this.table);
@@ -262,6 +281,7 @@ public class CommonRdbmsWriter {
         public void startWriteWithConnection(RecordReceiver recordReceiver, TaskPluginCollector taskPluginCollector, Connection connection) {
             this.taskPluginCollector = taskPluginCollector;
 
+
             // 用于写入数据的时候的类型根据目的表字段类型转换
             this.resultSetMetaData = DBUtil.getColumnMetaData(connection,
                     this.table, StringUtils.join(this.columns, ","));
@@ -271,32 +291,65 @@ public class CommonRdbmsWriter {
             List<Record> writeBuffer = new ArrayList<Record>(this.batchSize);
             int bufferBytes = 0;
             try {
-                Record record;
-                while ((record = recordReceiver.getFromReader()) != null) {
-                    if (record.getColumnNumber() != this.columnNumber) {
-                        // 源头读取字段列数与目的表字段写入列数不相等，直接报错
-                        throw DataXException
-                                .asDataXException(
-                                        DBUtilErrorCode.CONF_ERROR,
-                                        String.format(
-                                                "列配置信息有错误. 因为您配置的任务中，源头读取字段数:%s 与 目的表要写入的字段数:%s 不相等. 请检查您的配置并作出修改.",
-                                                record.getColumnNumber(),
-                                                this.columnNumber));
-                    }
+                    //add by luwc  pg CopyIn
+                    switch (this.dataBaseType){
+                        case PostgreSQL:
+                            PostgreWriterInputStreamAdapter localInputStream = null;
+                            try{
+                                    LOG.info(String.format("Load sql: %s.", writeRecordSql));
 
-                    writeBuffer.add(record);
-                    bufferBytes += record.getMemorySize();
+                                    localInputStream = new PostgreWriterInputStreamAdapter(recordReceiver);
+                                    CopyManager copyManager = connection.unwrap(PGConnection.class).getCopyAPI();
+                                    copyManager.copyIn(writeRecordSql,localInputStream);
 
-                    if (writeBuffer.size() >= batchSize || bufferBytes >= batchByteSize) {
-                        doBatchInsert(connection, writeBuffer);
-                        writeBuffer.clear();
-                        bufferBytes = 0;
-                    }
+                            } catch (Exception e) {
+                                throw DataXException.asDataXException(
+                                        DBUtilErrorCode.WRITE_DATA_ERROR, e);
+                            } finally {
+                                    writeBuffer.clear();
+                                    bufferBytes = 0;
+                                     localInputStream.close();
+
+                            }
+                            break;
+                        default:
+                            Record record;
+                            while ((record = recordReceiver.getFromReader()) != null) {
+                                if (record.getColumnNumber() != this.columnNumber) {
+                                    // 源头读取字段列数与目的表字段写入列数不相等，直接报错
+                                    throw DataXException
+                                            .asDataXException(
+                                                    DBUtilErrorCode.CONF_ERROR,
+                                                    String.format(
+                                                            "列配置信息有错误. 因为您配置的任务中，源头读取字段数:%s 与 目的表要写入的字段数:%s 不相等. 请检查您的配置并作出修改.",
+                                                            record.getColumnNumber(),
+                                                            this.columnNumber));
+                                }
+                                writeBuffer.add(record);
+                                bufferBytes += record.getMemorySize();
+                                if (writeBuffer.size() >= batchSize || bufferBytes >= batchByteSize) {
+                                    //LOG.info(String.format("here is normal doBatchInsert"));
+                                    doBatchInsert(connection, writeBuffer);
+                                    writeBuffer.clear();
+                                    bufferBytes = 0;
+                                }
+                            }
+                            break;
+
+
                 }
                 if (!writeBuffer.isEmpty()) {
-                    doBatchInsert(connection, writeBuffer);
-                    writeBuffer.clear();
-                    bufferBytes = 0;
+                    switch (this.dataBaseType) {
+                        case PostgreSQL:
+                            writeBuffer.clear();
+                            bufferBytes = 0;
+                            break;
+                        default:
+                            doBatchInsert(connection, writeBuffer);
+                            writeBuffer.clear();
+                            bufferBytes = 0;
+                            break;
+                    }
                 }
             } catch (Exception e) {
                 throw DataXException.asDataXException(
@@ -304,9 +357,12 @@ public class CommonRdbmsWriter {
             } finally {
                 writeBuffer.clear();
                 bufferBytes = 0;
+
                 DBUtil.closeDBResources(null, null, connection);
             }
         }
+
+
 
         // TODO 改用连接池，确保每次获取的连接都是可用的（注意：连接可能需要每次都初始化其 session）
         public void startWrite(RecordReceiver recordReceiver,
@@ -343,6 +399,7 @@ public class CommonRdbmsWriter {
 
         protected void doBatchInsert(Connection connection, List<Record> buffer)
                 throws SQLException {
+            //LOG.info(String.format("here is doBatchInsert"));
             PreparedStatement preparedStatement = null;
             try {
                 connection.setAutoCommit(false);
@@ -357,6 +414,7 @@ public class CommonRdbmsWriter {
                 preparedStatement.executeBatch();
                 connection.commit();
             } catch (SQLException e) {
+
                 LOG.warn("回滚此次写入, 采用每次写入一行方式提交. 因为:" + e.getMessage());
                 connection.rollback();
                 doOneInsert(connection, buffer);
@@ -370,6 +428,7 @@ public class CommonRdbmsWriter {
 
         protected void doOneInsert(Connection connection, List<Record> buffer) {
             PreparedStatement preparedStatement = null;
+            LOG.info(String.format("here is doOneInsert"));
             try {
                 connection.setAutoCommit(true);
                 preparedStatement = connection
@@ -556,8 +615,17 @@ public class CommonRdbmsWriter {
                     forceUseUpdate = true;
                 }
 
-                INSERT_OR_REPLACE_TEMPLATE = WriterUtil.getWriteTemplate(columns, valueHolders, writeMode, dataBaseType, forceUseUpdate);
-                writeRecordSql = String.format(INSERT_OR_REPLACE_TEMPLATE, this.table);
+                //add by luwc
+                switch(this.dataBaseType){
+                    case PostgreSQL:
+                        this.writeRecordSql =  "COPY " + this.table + " FROM STDIN WITH  DELIMITER '\001' ";
+                        break;
+                    default:
+                        INSERT_OR_REPLACE_TEMPLATE = WriterUtil.getWriteTemplate(columns, valueHolders, writeMode, dataBaseType, forceUseUpdate);
+                        this.writeRecordSql = String.format(INSERT_OR_REPLACE_TEMPLATE, this.table);
+                        break;
+                }
+
             }
         }
 

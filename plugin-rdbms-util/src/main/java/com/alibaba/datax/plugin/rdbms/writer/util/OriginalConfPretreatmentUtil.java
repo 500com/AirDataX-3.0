@@ -1,17 +1,25 @@
 package com.alibaba.datax.plugin.rdbms.writer.util;
 
+import com.alibaba.datax.common.constant.PluginType;
 import com.alibaba.datax.common.exception.DataXException;
 import com.alibaba.datax.common.util.Configuration;
 import com.alibaba.datax.common.util.ListUtil;
+import com.alibaba.datax.core.util.container.LoadUtil;
 import com.alibaba.datax.plugin.rdbms.util.*;
 import com.alibaba.datax.plugin.rdbms.writer.Constant;
 import com.alibaba.datax.plugin.rdbms.writer.Key;
+import com.alibaba.fastjson.JSON;
+import com.google.common.collect.Sets;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.sql.Connection;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 public final class OriginalConfPretreatmentUtil {
     private static final Logger LOG = LoggerFactory
@@ -36,6 +44,215 @@ public final class OriginalConfPretreatmentUtil {
         dealWriteMode(originalConfig, dataBaseType);
     }
 
+    public static void doPretreatment(Configuration originalConfig, DataBaseType dataBaseType,Configuration peerConfig,String peerPluginName) {
+        // 检查 username/password 配置（必填）
+        originalConfig.getNecessaryValue(Key.USERNAME, DBUtilErrorCode.REQUIRED_VALUE);
+        originalConfig.getNecessaryValue(Key.PASSWORD, DBUtilErrorCode.REQUIRED_VALUE);
+
+        doCheckBatchSize(originalConfig);
+
+        simplifyConf(originalConfig);
+
+        tryCreateDestTable(originalConfig,dataBaseType,peerConfig,peerPluginName);
+
+        if(dataBaseType != DataBaseType.Hive){ //hiveWriter/HDFSWriter的整合 指定了columns为*，不做任何检查 {
+            dealColumnConf(originalConfig);
+            dealWriteMode(originalConfig, dataBaseType);
+        }
+    }
+
+
+    public static void tryCreateDestTable(Configuration dest,DataBaseType destType,Configuration src,String srcPluginName){
+        boolean autoCreateTable = dest.getBool("autoCreateTable",true);
+        boolean autoDropTable = dest.getBool("autoDropTable",false);
+
+        LOG.warn("autoCreateTable set to {}",autoCreateTable);
+        LOG.warn("autoDropTable set to {}",autoDropTable);
+
+        //hive 需要处理分区，path等信息，这里不返回。
+        if(destType != DataBaseType.Hive && autoCreateTable == false)
+            return;
+
+        //hive 非自动建表，需保证columns和path等信息,这里直接返回，退回hdfswriter处理。
+        if(destType == DataBaseType.Hive && autoCreateTable == false) {
+            return;
+        }
+
+        //原表非rdbms，特殊处理
+        Set<String> rdbms = Sets.newHashSet("mysqlreader", "oraclereader", "sqlserverreader","postgresqlreader","drdsreader","hivereader");
+        String srcPluginNameLow  = srcPluginName.toLowerCase();
+        if(!rdbms.contains(srcPluginNameLow)) {
+            if("mongodbreader".equals(srcPluginNameLow)) {
+                List<Object> columns = src.getList("column");
+                for(int i=0;i<columns.size();i++) {
+                    Configuration column = Configuration.from(JSON.toJSONString(columns.get(i)));
+                    if("Long".equalsIgnoreCase(column.getString("type"))) {
+                        column.set("type","Long");
+                    }else if("array".equalsIgnoreCase(column.getString("type"))) {
+                        column.set("type","Long");
+                    }else if("bytes".equalsIgnoreCase(column.getString("type"))) {
+                        column.set("type","Long");
+                    }
+                    dest.set(String.format("column[%d]",i),column);
+                }
+            }else {
+                throw DataXException.asDataXException(DBUtilErrorCode.UNSUPPORTED_TYPE, String.format(
+                        "Writer对%s的autoCreateTable暂时不支持",srcPluginName));
+            }
+            return;
+        }
+
+        String srcUsername = src.getString(com.alibaba.datax.plugin.rdbms.reader.Key.USERNAME);
+        String srcPassword = src.getString(com.alibaba.datax.plugin.rdbms.reader.Key.PASSWORD);
+        Configuration srcConnectionConf = Configuration.from(src.getList(com.alibaba.datax.plugin.rdbms.reader.Constant.CONN_MARK, Object.class).get(0).toString());
+        String srcJdbcUrl = srcConnectionConf.getString(com.alibaba.datax.plugin.rdbms.reader.Key.JDBC_URL);
+        ClassLoader readerLoader = LoadUtil.getJarLoader(PluginType.READER, srcPluginName);
+        DataBaseType srcType = DataBaseType.getDataBaseType(srcPluginName); // writer的class loader
+
+        Connection srcConnection = null;
+        try {
+            //以reader classload加载类
+            Class readDBUtil = readerLoader.loadClass("com.alibaba.datax.plugin.rdbms.util.DBUtil");
+            Class dataBaseType = readerLoader.loadClass("com.alibaba.datax.plugin.rdbms.util.DataBaseType");
+            Method getReadSrcType = dataBaseType.getMethod("getDataBaseType",String.class) ;
+            Object readSrcType = getReadSrcType.invoke(null,srcPluginName); //使用的是reader的加载器。
+            Method getConnection = readDBUtil.getMethod("getConnection",dataBaseType,String.class,String.class,String.class);
+
+            //ClassLoader origin = Thread.currentThread().getContextClassLoader();
+            //Thread.currentThread().setContextClassLoader(readerLoader);
+            srcConnection = (Connection) getConnection.invoke(null, readSrcType, srcJdbcUrl,srcUsername,srcPassword);
+            //Thread.currentThread().setContextClassLoader(origin);
+
+        } catch (ClassNotFoundException e) {
+            e.printStackTrace();
+        } catch (NoSuchMethodException e) {
+            e.printStackTrace();
+        } catch (InvocationTargetException e) {
+            e.printStackTrace();
+        } catch (IllegalAccessException e) {
+            e.printStackTrace();
+        }
+
+        String username = dest.getString(Key.USERNAME);
+        String password = dest.getString(Key.PASSWORD);
+        List<Object> connections = dest.getList(Constant.CONN_MARK,
+                Object.class);
+
+        boolean isSrcTableMode = OriginalConfPretreatmentUtil.recognizeTableOrQuerySqlMode(src);
+
+        if(isSrcTableMode) {
+            String srcTable = srcConnectionConf.getList(com.alibaba.datax.plugin.rdbms.reader.Key.TABLE, String.class).get(0);
+            String columns = src.getString(com.alibaba.datax.plugin.rdbms.reader.Key.COLUMN);
+
+            for (int i = 0, len = connections.size(); i < len; i++) {
+                Configuration connConf = Configuration.from(JSON.toJSONString(connections.get(i)));
+                String jdbcUrl = connConf.getString(Key.JDBC_URL);
+                List<String> expandedTables = connConf.getList(Key.TABLE, String.class);
+
+                Connection connection = DBUtil.getConnection(destType,jdbcUrl,username,password) ;
+
+                for(String table:expandedTables) {
+                    boolean tableExist =  DBUtil.checkTableExist(connection,table,destType);
+                    LOG.warn("dest table {} existence:{}",table,tableExist);
+
+                    if(autoDropTable && tableExist) {
+                        LOG.warn("try drop dest table {}",table);
+                        DBUtil.dropTable(connection,destType,table);
+                    }
+                    //DBUtil.checkTableExist(destType,jdbcUrl,username,password,table);
+
+                    if(!tableExist || autoDropTable) {
+                        LOG.warn("try create dest table {}",table);
+                        DBUtil.createTableWithConfig(srcConnection, srcType, srcTable, connection, destType, table, columns,dest);
+                    }
+
+                    //这里表已经建好
+                    //boolean isHivePartitionTable = dest.getBool("isHivePartitioned",false);
+                    if(destType == DataBaseType.Hive) {
+                        //出来hive特有的任务
+                        //1. 是否分区及分区partition字段
+                        //2. 所有字段名称和类型
+                        //3. 分区对应的path 等路径
+                        DBUtil.dealHive(dest, connection, table);
+                    }
+                }
+                try {
+                    if(connection !=null && !connection.isClosed())
+                        connection.close();
+                }catch (Exception e) {
+                    LOG.warn("connection is closed {}",e);
+                }
+            }
+
+            try {
+                if(srcConnection !=null && !srcConnection.isClosed())
+                    srcConnection.close();
+            }catch (Exception e) {
+                LOG.warn("connection is closed {}",e);
+            }
+        }else{
+            String query = srcConnectionConf.getList(com.alibaba.datax.plugin.rdbms.reader.Key.QUERY_SQL,String.class).get(0);
+            for (int i = 0, len = connections.size(); i < len; i++) {
+                Configuration connConf = Configuration.from(JSON.toJSONString(connections.get(i)));
+                String jdbcUrl = connConf.getString(Key.JDBC_URL);
+
+                List<String> expandedTables = connConf.getList(Key.TABLE, String.class);
+                Connection connection = DBUtil.getConnection(destType,jdbcUrl,username,password) ;
+
+                for(String table:expandedTables) {
+                    boolean tableExist =  DBUtil.checkTableExist(connection,table,destType);
+                    //DBUtil.checkTableExist(destType,jdbcUrl,username,password,table);
+                    LOG.warn("dest table {} existence:{}",table,tableExist);
+
+                    if(autoDropTable && tableExist) {
+                        LOG.warn("try drop dest table {}",table);
+                        DBUtil.dropTable(connection,destType,table);
+                    }
+                    if(!tableExist || autoDropTable) {
+                        LOG.warn("try create dest table {}",table);
+                        DBUtil.createTableWithConfig(srcConnection, srcType, query, connection, destType, table, dest);
+                    }
+                    //这里表已经建好
+                    if(destType == DataBaseType.Hive) {
+                        DBUtil.dealHive(dest, connection, table);
+                    }
+                }
+                try {
+                    if(connection !=null && !connection.isClosed())
+                        connection.close();
+                }catch (Exception e) {
+                    LOG.warn("connection is closed {}",e);
+                }
+            }
+
+            try {
+                if(srcConnection !=null && !srcConnection.isClosed())
+                    srcConnection.close();
+            }catch (Exception e) {
+                LOG.warn("connection is closed {}",e);
+            }
+        }
+    }
+
+
+
+    public static void doPretreatReader(Configuration originalConfig){
+        originalConfig.getNecessaryValue(com.alibaba.datax.plugin.rdbms.reader.Key.USERNAME,
+                DBUtilErrorCode.REQUIRED_VALUE);
+        originalConfig.getNecessaryValue(com.alibaba.datax.plugin.rdbms.reader.Key.PASSWORD,
+                DBUtilErrorCode.REQUIRED_VALUE);
+
+        String where = originalConfig.getString(com.alibaba.datax.plugin.rdbms.reader.Key.WHERE, null);
+        if(StringUtils.isNotBlank(where)) {
+            String whereImprove = where.trim();
+            if(whereImprove.endsWith(";") || whereImprove.endsWith("；")) {
+                whereImprove = whereImprove.substring(0,whereImprove.length()-1);
+            }
+            originalConfig.set(com.alibaba.datax.plugin.rdbms.reader.Key.WHERE, whereImprove);
+        }
+        simplifyConf(originalConfig);
+    }
+
     public static void doCheckBatchSize(Configuration originalConfig) {
         // 检查batchSize 配置（选填，如果未填写，则设置为默认值）
         int batchSize = originalConfig.getInt(Key.BATCH_SIZE, Constant.DEFAULT_BATCH_SIZE);
@@ -55,7 +272,7 @@ public final class OriginalConfPretreatmentUtil {
         int tableNum = 0;
 
         for (int i = 0, len = connections.size(); i < len; i++) {
-            Configuration connConf = Configuration.from(connections.get(i).toString());
+            Configuration connConf = Configuration.from(JSON.toJSONString(connections.get(i)));
 
             String jdbcUrl = connConf.getString(Key.JDBC_URL);
             if (StringUtils.isBlank(jdbcUrl)) {
@@ -179,6 +396,58 @@ public final class OriginalConfPretreatmentUtil {
             return true;
         }
         return false;
+    }
+
+
+    /**
+     * 为了自动建表添加，需知道是否是查询语句还是table
+     * @param originalConfig
+     * @return
+     */
+    public static boolean recognizeTableOrQuerySqlMode(
+            Configuration originalConfig) {
+        List<Object> conns = originalConfig.getList(com.alibaba.datax.plugin.rdbms.reader.Constant.CONN_MARK,
+                Object.class);
+
+        List<Boolean> tableModeFlags = new ArrayList<Boolean>();
+        List<Boolean> querySqlModeFlags = new ArrayList<Boolean>();
+
+        String table = null;
+        String querySql = null;
+
+        boolean isTableMode = false;
+        boolean isQuerySqlMode = false;
+        for (int i = 0, len = conns.size(); i < len; i++) {
+            Configuration connConf = Configuration
+                    .from(conns.get(i).toString());
+            table = connConf.getString(com.alibaba.datax.plugin.rdbms.reader.Key.TABLE, null);
+            querySql = connConf.getString(com.alibaba.datax.plugin.rdbms.reader.Key.QUERY_SQL, null);
+
+            isTableMode = StringUtils.isNotBlank(table);
+            tableModeFlags.add(isTableMode);
+
+            isQuerySqlMode = StringUtils.isNotBlank(querySql);
+            querySqlModeFlags.add(isQuerySqlMode);
+
+            if (false == isTableMode && false == isQuerySqlMode) {
+                // table 和 querySql 二者均未配制
+                throw DataXException.asDataXException(
+                        DBUtilErrorCode.TABLE_QUERYSQL_MISSING, "您的配置有误. 因为table和querySql应该配置并且只能配置一个. 请检查您的配置并作出修改.");
+            } else if (true == isTableMode && true == isQuerySqlMode) {
+                // table 和 querySql 二者均配置
+                throw DataXException.asDataXException(DBUtilErrorCode.TABLE_QUERYSQL_MIXED,
+                        "您的配置凌乱了. 因为datax不能同时既配置table又配置querySql.请检查您的配置并作出修改.");
+            }
+        }
+
+        // 混合配制 table 和 querySql
+        if (!ListUtil.checkIfValueSame(tableModeFlags)
+                || !ListUtil.checkIfValueSame(tableModeFlags)) {
+            throw DataXException.asDataXException(DBUtilErrorCode.TABLE_QUERYSQL_MIXED,
+                    "您配置凌乱了. 不能同时既配置table又配置querySql. 请检查您的配置并作出修改.");
+        }
+
+        return tableModeFlags.get(0);
     }
 
 }

@@ -7,7 +7,7 @@ import com.alibaba.datax.plugin.rdbms.reader.Key;
 import com.alibaba.druid.sql.parser.SQLParserUtils;
 import com.alibaba.druid.sql.parser.SQLStatementParser;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
-
+import org.apache.commons.lang.StringEscapeUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.ImmutableTriple;
 import org.apache.commons.lang3.tuple.Triple;
@@ -214,6 +214,615 @@ public final class DBUtil {
         return false;
     }
 
+    public static boolean checkTableExist(DataBaseType dataBaseType, String jdbcURL, String userName, String password,String tableName){
+        boolean flag = false;
+        Connection connection = connect(dataBaseType, jdbcURL, userName, password);
+        ResultSet rs = null;
+        try {
+            DatabaseMetaData meta = connection.getMetaData();
+            String type [] = {"TABLE"};
+            rs = meta.getTables(null, null, tableName, type);
+            flag = rs.next();
+        } catch (SQLException e) {
+            e.printStackTrace();
+            LOG.warn("cant connect to {},{}",jdbcURL,userName);
+        }finally {
+            closeDBResources(rs,null,connection);
+        }
+        return flag;
+    }
+
+    public static boolean checkTableExist(Connection connection,String tableName) {
+        boolean flag = false;
+        ResultSet rs = null;
+        try{
+            DatabaseMetaData meta = connection.getMetaData();
+            String type [] = {"TABLE","VIEW"};
+//            System.out.println("List of tables: ");
+//            while (res.next()) {
+//                System.out.println(
+//                        "   "+res.getString("TABLE_CAT")
+//                                + ", "+res.getString("TABLE_SCHEM")
+//                                + ", "+res.getString("TABLE_NAME")
+//                                + ", "+res.getString("TABLE_TYPE")
+//                                + ", "+res.getString("REMARKS"));
+//            }
+            //String type [] = null;
+            rs = meta.getTables(null, null, tableName, type);
+            flag = rs.next();
+        }catch (SQLException e) {
+            e.printStackTrace();
+        }
+        //return  false;
+        return flag;
+    }
+
+
+    public static boolean checkTableExist(Connection connection,String tableName,DataBaseType dbtype) {
+        boolean flag = false;
+        ResultSet rs = null;
+        ResultSet rsPattern = null;
+        String tableNamePattern = tableName;
+        try{
+            DatabaseMetaData meta = connection.getMetaData();
+            String type [] = {"TABLE","VIEW"};
+
+            if(dbtype == DataBaseType.Oracle) {
+                tableNamePattern = tableNamePattern.toUpperCase();
+            }else if(dbtype == DataBaseType.PostgreSQL) {
+                tableNamePattern = tableNamePattern.toLowerCase();
+            }
+
+            rs = meta.getTables(null, null, tableName, type);
+            rsPattern = meta.getTables(null, null, tableNamePattern, type);
+            flag = rs.next() || rsPattern.next();
+        }catch (SQLException e) {
+            e.printStackTrace();
+        }
+        //return  false;
+        return flag;
+    }
+
+    /**
+     * 添加hive分区，修正path和列columns
+     * @param dest
+     * @param conn
+     * @param table
+     */
+    public static void dealHive(Configuration dest,Connection conn,String table) {
+        String path = dest.getString("tablePath");
+        ArrayList<HashMap<String,String>> columnConfig = new ArrayList<HashMap<String,String>>();
+        Statement destStmt = null;
+        try {
+            destStmt = conn.createStatement(ResultSet.TYPE_FORWARD_ONLY,
+                ResultSet.CONCUR_READ_ONLY);
+            destStmt.setFetchSize(1);
+            destStmt.execute("set hive.resultset.use.unique.column.names=false");
+            destStmt.execute("set hive.execution.engine=mr");
+
+            ResultSet rs = destStmt.executeQuery(String.format("select * from %s where 1=2",table));
+            ResultSetMetaData rsmd = rs.getMetaData();
+            int columnCount = rsmd.getColumnCount();
+
+            for(int i=1;i<=columnCount;i++) {
+                String type = null;
+                String typeInfo = rsmd.getColumnTypeName(i);
+                String colName = rsmd.getColumnName(i);
+                int scale = rsmd.getScale(i);
+                int index = typeInfo.indexOf("(");
+                if(index<0) {
+                    type = typeInfo;
+                }else {
+                    type = typeInfo.substring(0,typeInfo.indexOf("("));
+                }
+                if("decimal".equalsIgnoreCase(type) || "numeric".equalsIgnoreCase(type)) {
+                    if(scale==0) {
+                        type = "BIGINT";
+                    }else {
+                        type = "DOUBLE";
+                    }
+                }
+
+                if("binary".equalsIgnoreCase(type) || "varbinary".equalsIgnoreCase(type)) {
+                    type = "String";
+                }
+
+                HashMap<String,String> col = new HashMap<String, String>();
+                col.put("name", colName);
+                col.put("type", type);
+                columnConfig.add(col);
+            }
+
+            dest.set("column", columnConfig);
+
+
+            boolean isHivePartitionTable = dest.getBool("isHivePartitioned",false);
+
+            if(isHivePartitionTable) {
+                List<String> valueList = dest.getList("partitionValueList",String.class);
+                int partitionColumnCount = dest.getInt("partitionColumnCount");
+                StringBuilder sb = new StringBuilder();
+                sb.append(String.format("alter table %s add partition(",table));
+
+                for(int i=columnCount-partitionColumnCount+1;i<=columnCount;i++) {
+                    String colName = rsmd.getColumnLabel(i);
+                    sb.append(colName + "=\"" + valueList.get(i+partitionColumnCount-columnCount-1) + "\"");
+                    if(i!=columnCount)
+                        sb.append(",");
+                    path = path+ "/"+ colName+ "="+valueList.get(i+partitionColumnCount-columnCount-1);
+                }
+                sb.append(")");
+                sb.append(String.format(" location '%s'",path));
+                LOG.info("set hdfswriter path",path);
+                dest.set("path",path);
+                LOG.info("add partition:{}",sb.toString());
+                destStmt.executeUpdate(sb.toString());
+                destStmt.close();
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
+
+    /**
+     * 删除指定表
+     * @param destConn
+     * @param type
+     * @param tableName
+     */
+    public static void dropTable(Connection destConn,DataBaseType type,String tableName) {
+        String dropTable = "drop table "+tableName;
+        Statement st = null;
+        try {
+             st = destConn.createStatement();
+             st.executeUpdate(dropTable);
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }finally {
+            if(st!=null)
+                try {
+                    st.close();
+                } catch (SQLException e) {
+                    e.printStackTrace();
+                }
+        }
+    }
+
+    /**
+     * 必须保证src中有标的表，而dest中无
+     * @param srcConn
+     * @param srcType
+     * @param destConn
+     * @param destType
+     * @param table
+     */
+    public static void createTableWithConfig(Connection srcConn , DataBaseType srcType,String srcTable,Connection destConn,DataBaseType destType,String table,String columns,Configuration dest) {
+        String querySql = buildQuerySql(srcTable,columns);
+        createTableWithConfig(srcConn, srcType, querySql, destConn, destType, table,dest);
+    }
+
+
+    private static String buildQuerySql(String table,String columns) {
+        String blank = " ";
+        StringBuilder sb = new StringBuilder();
+        sb.append("select");
+        sb.append(blank);
+        sb.append(columns);
+        sb.append(blank);
+        sb.append("from");
+        sb.append(blank);
+        sb.append(table);
+        sb.append(blank);
+        sb.append("where 1=2");
+
+        return sb.toString();
+    }
+
+    /**
+     * 必须保证src中有标的表，而dest中无
+     * hive 需要更新dest这方的plugin的配置信息，去匹配hdfswriter中的path和column信息
+     * @param srcConn
+     * @param srcType
+     * @param destConn
+     * @param destType
+     * @param table 需要建表的名称
+     */
+    public static void createTableWithConfig(Connection srcConn , DataBaseType srcType,String querySql,Connection destConn,DataBaseType destType,String table,Configuration dest) {
+
+        if(!querySql.endsWith("where 1=2")) //无限制条件
+            querySql = String.format(" select * from ( %s ) datax_local_subquery where 1=2 ",querySql);//添加限制条件。这里query当作子查询并加条件限制。依赖数据库的解析器是否能优化执行。
+
+        LOG.warn("create table for table {}",table);
+        LOG.warn("create table as query [{}]",querySql);
+
+        Statement stmt = null;
+        Statement destStmt = null;
+        try {
+            srcConn.setAutoCommit(false);
+            stmt = srcConn.createStatement(ResultSet.TYPE_FORWARD_ONLY,
+                    ResultSet.CONCUR_READ_ONLY);
+            stmt.setFetchSize(1);
+
+            if(srcType == DataBaseType.Hive) {
+                //hive returns column name with table name,set this to false to disable it
+                stmt.execute("set hive.resultset.use.unique.column.names=false");
+                stmt.execute("set hive.execution.engine=mr");
+            }
+
+            boolean isHivePartitioned = false;
+            if(destType == DataBaseType.Hive && dest.getBool("isHivePartitioned")) {
+                isHivePartitioned = true;
+            }
+
+            ResultSet rs = stmt.executeQuery(querySql);
+
+            ResultSetMetaData rsmd = rs.getMetaData();
+            int columnCount = rsmd.getColumnCount();
+
+            StringBuilder sb = new StringBuilder( 1024 );
+
+            if(!isHivePartitioned) {
+                if ( columnCount > 0 ) {
+                    sb.append( "Create table " ).append(table).append( " ( " );
+                }
+                for ( int i = 1; i <= columnCount; i ++ ) {
+                    if ( i > 1 ) sb.append( ", " );
+
+                    int columnType = rsmd.getColumnType(i);
+                    String typeName =rsmd.getColumnTypeName(i);
+                    String colName = rsmd.getColumnLabel(i);
+                    int precision = rsmd.getPrecision(i);
+                    int scale = rsmd.getScale(i);
+
+                    String typeInfo = getTranedType(srcType, destType, columnType,typeName,colName,precision,scale);
+                    sb.append(" ").append(colName).append(" ").append(typeInfo);
+                } // for columns
+                sb.append( " ) " );
+            } else {
+                int partitionColumnCount = dest.getInt("partitionColumnCount");
+                List<String> valueList = dest.getList("partitionValueList",String.class);
+
+
+                if ( columnCount > 0 ) {
+                    sb.append( "Create table " ).append(table).append( " ( " );
+                }
+
+                for ( int i = 1; i <= columnCount; i ++ ) {
+                    if ( i > 1 && i != columnCount-partitionColumnCount+1 ) sb.append( ", " );
+                    if(i==columnCount-partitionColumnCount+1) {
+                        sb.append( " ) " );
+                        sb.append(" PARTITIONED BY (");
+                    }
+
+                    int columnType = rsmd.getColumnType(i);
+                    String typeName =rsmd.getColumnTypeName(i);
+                    String colName = rsmd.getColumnLabel(i);
+                    int precision = rsmd.getPrecision(i);
+                    int scale = rsmd.getScale(i);
+
+                    String typeInfo = getTranedType(srcType, destType, columnType,typeName,colName,precision,scale);
+                    sb.append(" ").append(colName).append(" ").append(typeInfo);
+
+                    //构造hdfswriter所需的columns信息,和其类型保持一致
+                } // for columns
+                sb.append( " ) " );
+            }
+
+
+            if(destType == DataBaseType.Hive) {
+                String lineDelimiter = StringEscapeUtils.escapeJava(dest.getString("lineDelimiter","\n"));
+                String fieldDelimiter = StringEscapeUtils.escapeJava(dest.getString("fieldDelimiter", "\t"));
+                String fileType = dest.getString("fileType","text");
+                if("text".equalsIgnoreCase(fileType)) {
+                    fileType = "textfile";
+                }
+                sb.append("ROW FORMAT DELIMITED FIELDS TERMINATED BY '"
+                        + fieldDelimiter + "' LINES TERMINATED BY '" + lineDelimiter
+                        + "' STORED AS " + fileType);
+            }
+            LOG.warn(sb.toString());
+
+            boolean isAutoCommit = destConn.getAutoCommit();
+
+            if(destType != DataBaseType.Hive)
+                destConn.setAutoCommit(false);
+
+            destStmt = destConn.createStatement(ResultSet.TYPE_FORWARD_ONLY,
+                    ResultSet.CONCUR_READ_ONLY);
+            destStmt.executeUpdate(sb.toString());
+
+
+            if(destType != DataBaseType.Hive) {
+                destConn.commit();
+                destConn.setAutoCommit(isAutoCommit);
+            }
+
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }finally {
+                try {
+                    if(stmt!=null) {
+                        stmt.close();
+                    }
+                    if(destStmt!=null) {
+                        stmt.close();
+                    }
+                } catch (SQLException e) {
+                    e.printStackTrace();
+                }
+        }
+
+    }
+
+    private static String getColDesc(DataBaseType srcType,DataBaseType destType, ResultSetMetaData rsmd ,int colIndex) throws SQLException {
+        //暂时不支持ads,drds,,tddl
+        int columnType = rsmd.getColumnType(colIndex);
+        String typeName =rsmd.getColumnTypeName(colIndex);
+        String colName = rsmd.getColumnLabel(colIndex);
+//        if(srcType == DataBaseType.Hive && colName.toLowerCase().startsWith(String.format("%s\\.",.toLowerCase()))) {
+//            colName = colName.substring(typeName)
+//        }
+        int precision = rsmd.getPrecision(colIndex);
+        int scale = rsmd.getScale(colIndex);
+
+
+
+        return  null;
+    }
+
+
+    private static String getTranedType(DataBaseType srcType,DataBaseType destType,int columnType,String typeName,String colName,int precision,int scale) {
+//        System.out.println("==========colName========" + colName);
+//        System.out.println("==========typeName========"+typeName);
+//        System.out.println("==========precision========"+precision);
+//        System.out.println("==========scale========"+scale);
+        switch (columnType) {
+            case Types.CHAR:
+            case Types.NCHAR:
+            case Types.CLOB:
+            case Types.NCLOB:
+            case Types.VARCHAR:
+            case Types.LONGVARCHAR:
+            case Types.NVARCHAR:
+            case Types.LONGNVARCHAR:
+                if(precision <=255 ) {
+                    //处理varchar<4000
+                    if(destType == DataBaseType.Oracle) {
+                        return "varchar2(255)";
+                    }else
+                        return "varchar(255)";
+                }else if(precision <=1000 ) {
+                    //处理varchar<4000
+                    if(destType == DataBaseType.Oracle) {
+                        return "varchar2(1000)";
+                    }else
+                        return "varchar(1000)";
+                }
+                else if(precision <=4000 ){
+                    //处理varchar<4000
+                    if(destType == DataBaseType.Oracle) {
+                        return "varchar2(4000)";
+                    }else
+                        return "varchar(4000)";
+                }else if(precision <=8000) {
+                    if(destType == DataBaseType.Oracle) {
+                        return "clob";
+                    }else
+                        return "varchar(8000)";
+                }else {
+                    //处理hive string类型，默认为varchar(8000) 或者varchar2(4000)
+                    if (srcType == DataBaseType.Hive) {
+                        if (destType == DataBaseType.Oracle) {
+                            return "varchar2(4000)";
+                        } else
+                            return "varchar(8000)";
+                    } else {
+                        switch (destType) {
+                            case Oracle:
+                            case DB2:
+                                return "clob";
+                            case SQLServer:
+                            case PostgreSQL:
+                                return "text";
+                            case MySql:
+                                return "LONGTEXT";
+                            case Hive:
+                                return "string";
+                            default:
+                                return "clob";
+                        }
+                    }
+                }
+            case Types.TINYINT:
+                if(precision==1&&scale==0) {
+                    //boolean
+                    switch (destType) {
+                        case Oracle:
+                            return  "number(1)";
+                        case PostgreSQL:
+                        case DB2:
+                            return "smallint";
+                        default:
+                            return "tinyint";
+                    }
+                }
+
+            case Types.SMALLINT:
+            case Types.INTEGER:
+            case Types.BIGINT:
+                if (destType == DataBaseType.Oracle) {
+                    return "number(38)";
+                } else
+                    return "bigint";
+
+            case Types.FLOAT:
+                return "float";
+
+            case Types.REAL:
+            case Types.DOUBLE:
+                if (destType == DataBaseType.Oracle) {
+                    return String.format("number(%d,%d)",precision,scale);
+                } else
+                return "double";
+
+            case Types.NUMERIC:
+            case Types.DECIMAL:
+                if (destType == DataBaseType.Oracle) {
+                    return String.format("number(%d,%d)",precision,scale);
+                }
+
+                if(destType == DataBaseType.Hive) {
+                    //整数
+                    if(scale <= 0) {
+                        return String.format("BIGINT");
+                    }
+//                    if(precision <= 0 || precision > 38)
+//                        precision = 38;
+//
+//                    if(scale < 0) {
+//                        scale = 0;
+//                    }else if(scale > 38 ) {
+//                        scale = 38;
+//                    }
+//                    return String.format("decimal(%d,%d)",precision,scale);
+
+                    //hdfsWriter 不支持 decimal，故转double，可能出现溢出问题。
+                    return String.format("DOUBLE");
+                }
+
+                return String.format("decimal(%d,%d)",precision,scale);
+                // for mysql bug, see http://bugs.mysql.com/bug.php?id=35115
+            case Types.DATE:
+                switch (destType){
+                    case SQLServer:
+                        return "datetime";
+                    case MySql: //year
+                        if(typeName.equalsIgnoreCase("year")) {
+                            return "year";
+                        }
+                    default:
+                        return "date";
+                }
+
+            case Types.TIME:
+                switch (destType) {
+                    case Oracle:
+                        return "timestamp";
+                    case SQLServer:
+                        return "datetime";
+                    default:
+                        return "time";
+                }
+
+            case Types.TIMESTAMP:
+                switch (destType) {
+                    case SQLServer:
+                        return "datetime";
+                    default:
+                        return "timestamp";
+                }
+
+                //这里使用上有限制，暂时全部当做长度有限制8000的二进制流处理。符合大多数场景。
+                //0-2000
+                //
+                //
+            case Types.BINARY:
+            case Types.VARBINARY:
+            case Types.BLOB:
+            case Types.LONGVARBINARY:
+                if(precision>0 && precision<=2000) {
+                    switch (destType) {
+                        case Oracle:
+                            return String.format("raw(%d)",precision);
+                        case DB2:
+                            return String.format("VARCHAR(%d) FOR BIT DATA",precision);
+                        case PostgreSQL:
+                            return String.format("bytea(%d)",precision);
+                        case Hive:
+                            return String.format("string");
+                        default:
+                            return String.format("varbinary(%d)",precision);
+                    }
+                }else if(precision>2000 & precision<=8000) {
+                    switch (destType) {
+                        case Oracle:
+                            return "BLOB";
+                        case DB2:
+                            return String.format("VARCHAR(%d) FOR BIT DATA", precision);
+                        case PostgreSQL:
+                            return String.format("bytea(%d)", precision);
+                        case Hive:
+                            return String.format("string");
+                        default:
+                            return String.format("varbinary(%d)", precision);
+                    }
+                }else {
+                    switch (destType) {
+                        case MySql:
+                            return "LONGBLOB";
+                        case SQLServer:
+                            return "IMAGE";
+                        case PostgreSQL:
+                            return "bytea";
+                        case Hive:
+                            return String.format("binary");
+                        default:
+                            return "BLOB";
+                    }
+                }
+            case Types.BOOLEAN:
+                switch (destType) {
+                    case Oracle:
+                        return  "number(1)";
+                    case DB2:
+                        return "smallint";
+                    default:
+                        return "tinyint";
+                }
+
+                // warn: bit(1) -> Types.BIT 可使用setBoolean
+                // warn: bit(>1) -> Types.VARBINARY 可使用setBytes
+
+            case Types.BIT:
+                if(precision==1 && srcType==DataBaseType.MySql) {
+                    switch (destType) {
+                        case Oracle:
+                            return  "number(1)";
+                        case DB2:
+                            return "smallint";
+                        default:
+                            return "tinyint";
+                    }
+                }else {
+                    switch (destType) {
+                        //warn: 有截断危险,unchecked
+                        case Oracle:
+                            return  "raw(2000)";
+                        case DB2:
+                            return "CHAR(255) FOR BIT DATA";
+                        case PostgreSQL:
+                            return "bit varying";
+                        case MySql:
+                            return "bit(64)";
+                        case SQLServer:
+                            return "binary(8000)";
+                        default:
+                            return "BIT";
+                    }
+                }
+            default:
+                throw DataXException
+                        .asDataXException(
+                                DBUtilErrorCode.UNSUPPORTED_TYPE,
+                                String.format(
+                                        "您的配置文件中的列配置信息有误. 因为DataX 不支持数据库写入这种字段类型. 字段名:[%s], 字段类型:[%s], 字段Java类型:[%d]. 请修改表中该字段的类型或者不同步该字段.",
+                                        colName,
+                                        typeName,
+                                        columnType));
+        }
+    }
+
 
     public static boolean checkInsertPrivilege(DataBaseType dataBaseType, String jdbcURL, String userName, String password, List<String> tableList) {
         Connection connection = connect(dataBaseType, jdbcURL, userName, password);
@@ -299,7 +908,6 @@ public final class DBUtil {
      */
     public static Connection getConnection(final DataBaseType dataBaseType,
                                            final String jdbcUrl, final String username, final String password) {
-
         return getConnection(dataBaseType, jdbcUrl, username, password, String.valueOf(Constant.SOCKET_TIMEOUT_INSECOND * 1000));
     }
 
@@ -314,7 +922,6 @@ public final class DBUtil {
      */
     public static Connection getConnection(final DataBaseType dataBaseType,
                                            final String jdbcUrl, final String username, final String password, final String socketTimeout) {
-
         try {
             return RetryUtil.executeWithRetry(new Callable<Connection>() {
                 @Override
@@ -356,7 +963,6 @@ public final class DBUtil {
 
     private static synchronized Connection connect(DataBaseType dataBaseType,
                                                    String url, String user, String pass, String socketTimeout) {
-
         //ob10的处理
         if (url.startsWith(com.alibaba.datax.plugin.rdbms.writer.Constant.OB10_SPLIT_STRING) && dataBaseType == DataBaseType.MySql) {
             String[] ss = url.split(com.alibaba.datax.plugin.rdbms.writer.Constant.OB10_SPLIT_STRING_PATTERN);
@@ -387,8 +993,10 @@ public final class DBUtil {
     private static synchronized Connection connect(DataBaseType dataBaseType,
                                                    String url, Properties prop) {
         try {
+
             Class.forName(dataBaseType.getDriverClassName());
             DriverManager.setLoginTimeout(Constant.TIMEOUT_SECONDS);
+
             return DriverManager.getConnection(url, prop);
         } catch (Exception e) {
             throw RdbmsException.asConnException(dataBaseType, e, prop.getProperty("user"), null);
@@ -422,11 +1030,15 @@ public final class DBUtil {
     public static ResultSet query(Connection conn, String sql, int fetchSize, int queryTimeout)
             throws SQLException {
         // make sure autocommit is off
+
         conn.setAutoCommit(false);
         Statement stmt = conn.createStatement(ResultSet.TYPE_FORWARD_ONLY,
                 ResultSet.CONCUR_READ_ONLY);
+
+
         stmt.setFetchSize(fetchSize);
-        stmt.setQueryTimeout(queryTimeout);
+        //stmt.setQueryTimeout(queryTimeout);   //对于hive就需要去除这个设置，不然会报错 mothod not　support
+
         return query(stmt, sql);
     }
 
@@ -584,6 +1196,8 @@ public final class DBUtil {
                                                String url, String user, String pass, boolean checkSlave){
         Connection connection = null;
 
+        //LOG.warn("dataBaseType:{},url:{},user:{},pass:{},checkSlave:{}",dataBaseType,url,user,pass,checkSlave);
+
         try {
             connection = connect(dataBaseType, url, user, pass);
             if (connection != null) {
@@ -716,6 +1330,13 @@ public final class DBUtil {
                 sessionConfig = config.getList(Key.SESSION,
                         new ArrayList<String>(), String.class);
                 DBUtil.doDealWithSessionConfig(conn, sessionConfig, message);
+                break;
+            case Hive:
+//                sessionConfig = new ArrayList<String>();
+//                sessionConfig.add("set ");
+//                sessionConfig.add("set hive.server2.async.exec.keepalive.time=60");
+//                sessionConfig.add("set hive.server2.long.polling.timeout=15000L");
+//                DBUtil.doDealWithSessionConfig(conn, sessionConfig, message);
                 break;
             default:
                 break;

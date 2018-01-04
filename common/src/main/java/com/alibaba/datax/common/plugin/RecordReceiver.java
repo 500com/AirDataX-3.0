@@ -17,8 +17,11 @@
 package com.alibaba.datax.common.plugin;
 
 import com.alibaba.datax.common.element.Record;
+import com.alibaba.datax.common.util.Configuration;
 
 public interface RecordReceiver {
+
+    public Configuration getMetaConf();
 
 	public Record getFromReader();
 

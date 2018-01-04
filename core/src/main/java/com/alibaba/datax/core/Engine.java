@@ -6,6 +6,7 @@ import com.alibaba.datax.common.spi.ErrorCode;
 import com.alibaba.datax.common.statistics.PerfTrace;
 import com.alibaba.datax.common.statistics.VMInfo;
 import com.alibaba.datax.common.util.Configuration;
+import com.alibaba.datax.common.util.DecryptUtil;
 import com.alibaba.datax.core.job.JobContainer;
 import com.alibaba.datax.core.taskgroup.TaskGroupContainer;
 import com.alibaba.datax.core.util.ConfigParser;
@@ -107,6 +108,25 @@ public class Engine {
         return jobConfWithSetting.beautify();
     }
 
+
+    //对password或者accessKey进行aes解密Decrypt
+    public static void DecryptConfiguration(Configuration configuration) {
+        Configuration jobConfWithSetting = configuration.getConfiguration("job").clone();
+        Configuration jobContent = jobConfWithSetting.getConfiguration("content");
+
+        Set<String> keys = jobContent.getKeys();
+        for (final String key : keys) {
+            boolean isSensitive = StringUtils.endsWithIgnoreCase(key, "password")
+                    || StringUtils.endsWithIgnoreCase(key, "accessKey");
+            if (isSensitive && jobContent.get(key) instanceof String) {
+                jobContent.set(key, DecryptUtil.decrypt(jobContent.getString(key)));
+            }
+        }
+
+        configuration.set("job.content",jobContent);
+    }
+
+
     public static Configuration filterSensitiveConfiguration(Configuration configuration){
         Set<String> keys = configuration.getKeys();
         for (final String key : keys) {
@@ -167,6 +187,8 @@ public class Engine {
         LOG.debug(configuration.toJSON());
 
         ConfigurationValidate.doValidate(configuration);
+        Engine.DecryptConfiguration(configuration);
+
         Engine engine = new Engine();
         engine.start(configuration);
     }

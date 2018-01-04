@@ -40,7 +40,11 @@ public class OracleWriter extends Writer {
 
 			this.commonRdbmsWriterJob = new CommonRdbmsWriter.Job(
 					DATABASE_TYPE);
-			this.commonRdbmsWriterJob.init(this.originalConfig);
+			//this.commonRdbmsWriterJob.init(this.originalConfig);
+            if(this.originalConfig.getBool("autoCreateTable",true) == true)
+                this.commonRdbmsWriterJob.init(this.originalConfig,super.getPeerPluginJobConf(),super.getPeerPluginName());
+            else
+                this.commonRdbmsWriterJob.init(this.originalConfig);
 		}
 
 		@Override

@@ -4,7 +4,10 @@ import com.alibaba.datax.common.exception.DataXException;
 import com.alibaba.datax.common.plugin.RecordReceiver;
 import com.alibaba.datax.common.spi.Writer;
 import com.alibaba.datax.common.util.Configuration;
-import com.alibaba.datax.plugin.unstructuredstorage.writer.Constant;
+import com.alibaba.datax.common.util.ListUtil;
+import com.alibaba.datax.plugin.rdbms.util.DataBaseType;
+import com.alibaba.datax.plugin.rdbms.writer.CommonRdbmsWriter;
+
 import com.google.common.collect.Sets;
 import org.apache.commons.io.Charsets;
 import org.apache.commons.io.IOUtils;
@@ -18,6 +21,8 @@ import java.util.*;
 
 public class HdfsWriter extends Writer {
     public static class Job extends Writer.Job {
+        private static DataBaseType DATABASE_TYPE = DataBaseType.Hive;
+
         private static final Logger LOG = LoggerFactory.getLogger(Job.class);
 
         private Configuration writerSliceConfig = null;
@@ -33,17 +38,97 @@ public class HdfsWriter extends Writer {
         private String encoding;
         private HashSet<String> tmpFiles = new HashSet<String>();//临时文件全路径
         private HashSet<String> endFiles = new HashSet<String>();//最终文件全路径
+        private boolean isHivePartitionTable = false;
 
         private HdfsHelper hdfsHelper = null;
+
+
+        private CommonRdbmsWriter.Job commonRdbmsWriterJob;
 
         @Override
         public void init() {
             this.writerSliceConfig = this.getPluginJobConf();
+            boolean hiveTableSwitch = writerSliceConfig.getBool(Key.hiveTableSwitch,false);
+
+            if(hiveTableSwitch) {
+                String hiveServer = writerSliceConfig.getString(Key.hiveServer,
+                    "192.168.41.225");
+                String hivePort = writerSliceConfig.getString(Key.hiveServerPort,
+                    "10000");
+                String hiveDatabase = writerSliceConfig.getString(Key.hiveDatabase, "default");
+                String hiveUsername = writerSliceConfig.getString(Key.hiveUsername, "datax");
+
+                String hiveTable = writerSliceConfig.getString(Key.hiveTableName);
+                String driverLocal = "jdbc:hive2://" + hiveServer + ":" + hivePort
+                    + "/" + hiveDatabase;
+
+                boolean isHivePartitionTable = false;
+                String origParValueInfo = this.writerSliceConfig.getString(Key.partitionValues, "").trim();
+                LOG.info("orgiParValueInfo:" + origParValueInfo);
+                ArrayList<String>  partitionValues = new ArrayList<String>();
+                if(org.apache.commons.lang.StringUtils.isNotEmpty(origParValueInfo)) {
+                    //partitionNames = org.apache.commons.lang.StringUtils.split(origParNameInfo, ',');
+                    String[] split = org.apache.commons.lang.StringUtils.split(origParValueInfo, ',');
+                    for(String value:split) {
+                        partitionValues.add(value);
+                    }
+                    if(partitionValues.size() != 0) {
+                        LOG.info("the partition values is {}!",origParValueInfo);
+                        //throw DataXException.asDataXException(HdfsWriterErrorCode.ILLEGAL_VALUE,"the partition values is empty!");
+                        isHivePartitionTable = true;
+                        this.isHivePartitionTable = isHivePartitionTable;
+                    }
+                }
+
+                this.writerSliceConfig.set(Key.IS_HIVE_PARTITIONED,isHivePartitionTable);
+                if(isHivePartitionTable) {
+                    this.writerSliceConfig.set(Key.HIVE_PARTITION_COLUMNS_COUNT,partitionValues.size());
+                    this.writerSliceConfig.set(Key.HIVE_PARTITION_VALUE_LIST,partitionValues);
+                }
+
+
+                List<String> tables = new ArrayList<String>();
+                tables.add(hiveTable);
+
+                Map<String,Object> connectionConfig = new HashMap<String,Object>();
+                connectionConfig.put(Key.TABLE_MARK,tables);
+                connectionConfig.put(Key.JDBC_URL,driverLocal);
+                this.writerSliceConfig.set(
+                        String.format("%s[0]", Key.CONN_MARK),
+                        connectionConfig);
+
+                List<String> columns = new ArrayList<String>();
+                columns.add("*");
+                this.writerSliceConfig.set(Key.COLUMN, columns); // hive should include all columns
+
+
+                String tablePath = null;
+                if(!"default".equalsIgnoreCase(hiveDatabase)){
+                    tablePath = Constant.DEFAULT_HIVE_DIR+"/"+hiveDatabase+".db"+"/"+hiveTable;
+                }else {
+                    tablePath = Constant.DEFAULT_HIVE_DIR+"/"+hiveTable;
+                }
+                this.writerSliceConfig.set(Key.TABLE_PATH,tablePath);
+                this.writerSliceConfig.set(Key.PATH,tablePath);
+
+
+                if(this.writerSliceConfig.getString(Key.USERNAME) == null) {
+                    this.writerSliceConfig.set(Key.USERNAME , hiveUsername);
+                }
+                if(this.writerSliceConfig.getString(Key.PASSWORD) == null) {
+                    this.writerSliceConfig.set(Key.PASSWORD , "");
+                }
+
+                this.commonRdbmsWriterJob = new CommonRdbmsWriter.Job(DATABASE_TYPE);
+                this.commonRdbmsWriterJob.init(this.writerSliceConfig, super.getPeerPluginJobConf(), super.getPeerPluginName());
+            }
+
             this.validateParameter();
 
             //创建textfile存储
             hdfsHelper = new HdfsHelper();
 
+            HdfsHelper.getNewLineReplace(this.writerSliceConfig);
             hdfsHelper.getFileSystem(defaultFS, this.writerSliceConfig);
         }
 
@@ -81,7 +166,7 @@ public class HdfsWriter extends Writer {
             //writeMode check
             this.writeMode = this.writerSliceConfig.getNecessaryValue(Key.WRITE_MODE, HdfsWriterErrorCode.REQUIRED_VALUE);
             writeMode = writeMode.toLowerCase().trim();
-            Set<String> supportedWriteModes = Sets.newHashSet("append", "nonconflict");
+            Set<String> supportedWriteModes = Sets.newHashSet("append", "nonconflict","truncate");
             if (!supportedWriteModes.contains(writeMode)) {
                 throw DataXException.asDataXException(HdfsWriterErrorCode.ILLEGAL_VALUE,
                         String.format("仅支持append, nonConflict两种模式, 不支持您配置的 writeMode 模式 : [%s]",
@@ -160,14 +245,12 @@ public class HdfsWriter extends Writer {
                 if(existFilePaths.length > 0){
                     isExistFile = true;
                 }
-                /**
+
                  if ("truncate".equals(writeMode) && isExistFile ) {
-                 LOG.info(String.format("由于您配置了writeMode truncate, 开始清理 [%s] 下面以 [%s] 开头的内容",
-                 path, fileName));
-                 hdfsHelper.deleteFiles(existFilePaths);
-                 } else
-                 */
-                if ("append".equalsIgnoreCase(writeMode)) {
+                    LOG.info(String.format("由于您配置了writeMode truncate, 开始清理 [%s] 下面以 [%s] 开头的内容",
+                    path, fileName));
+                    hdfsHelper.deleteFiles(existFilePaths);
+                 } else if ("append".equalsIgnoreCase(writeMode)) {
                     LOG.info(String.format("由于您配置了writeMode append, 写入前不做清理工作, [%s] 目录下写入相应文件名前缀  [%s] 的文件",
                             path, fileName));
                 } else if ("nonconflict".equalsIgnoreCase(writeMode) && isExistFile) {
@@ -180,7 +263,10 @@ public class HdfsWriter extends Writer {
                     throw DataXException.asDataXException(HdfsWriterErrorCode.ILLEGAL_VALUE,
                             String.format("由于您配置了writeMode nonConflict,但您配置的path: [%s] 目录不为空, 下面存在其他文件或文件夹.", path));
                 }
-            }else{
+            }else if(this.isHivePartitionTable) {
+                hdfsHelper.createDir(path);
+            }
+            else{
                 throw DataXException.asDataXException(HdfsWriterErrorCode.ILLEGAL_VALUE,
                         String.format("您配置的path: [%s] 不存在, 请先在hive端创建对应的数据库和表.", path));
             }

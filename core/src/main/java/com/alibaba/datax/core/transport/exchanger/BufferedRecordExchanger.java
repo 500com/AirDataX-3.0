@@ -39,6 +39,8 @@ public class BufferedRecordExchanger implements RecordSender, RecordReceiver {
 
 	private final TaskPluginCollector pluginCollector;
 
+    private Configuration metaConf;
+
 	@SuppressWarnings("unchecked")
 	public BufferedRecordExchanger(final Channel channel, final TaskPluginCollector pluginCollector) {
 		assert null != channel;
@@ -120,7 +122,12 @@ public class BufferedRecordExchanger implements RecordSender, RecordReceiver {
 		this.channel.pushTerminate(TerminateRecord.get());
 	}
 
-	@Override
+    @Override
+    public Configuration getMetaConf() {
+        return this.metaConf;
+    }
+
+    @Override
 	public Record getFromReader() {
 		if(shutdown){
 			throw DataXException.asDataXException(CommonErrorCode.SHUT_DOWN_TASK, "");
@@ -148,7 +155,12 @@ public class BufferedRecordExchanger implements RecordSender, RecordReceiver {
 		}
 	}
 
-	private void receive() {
+    @Override
+    public void setMetaConf(Configuration metaConf) {
+        this.metaConf = metaConf;
+    }
+
+    private void receive() {
 		this.channel.pullAll(this.buffer);
 		this.bufferIndex = 0;
 		this.bufferSize = this.buffer.size();

@@ -35,4 +35,7 @@ public class Key {
     
     // writer file type suffix, like .txt  .csv
     public static final String SUFFIX = "suffix";
+
+    // add by sunwq ,用于txtFileWriter是否进行base64编码，用于规避特殊字符
+    public static final String BASE64_ENCODING = "isBase64Encode";
 }

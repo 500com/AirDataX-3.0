@@ -20,6 +20,7 @@ import org.apache.commons.io.Charsets;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.io.compress.CompressionCodec;
+import org.apache.commons.net.util.Base64;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -263,6 +264,9 @@ public class UnstructuredStorageReaderUtil {
 		// warn: no default value '\N'
 		String nullFormat = readerSliceConfig.getString(Key.NULL_FORMAT);
 
+        boolean isBase64Encode = readerSliceConfig.getBool(Key.BASE64_ENCODING,
+                Constant.BASE64_ENCODING);
+
 		// warn: Configuration -> List<ColumnEntry> for performance
 		// List<Configuration> column = readerSliceConfig
 		// .getListConfiguration(Key.COLUMN);
@@ -284,11 +288,24 @@ public class UnstructuredStorageReaderUtil {
 			setCsvReaderConfig(csvReader);
 
 			String[] parseRows;
-			while ((parseRows = UnstructuredStorageReaderUtil
-					.splitBufferedReader(csvReader)) != null) {
-				UnstructuredStorageReaderUtil.transportOneRecord(recordSender,
-						column, parseRows, nullFormat, taskPluginCollector);
-			}
+
+            if(!isBase64Encode) {
+			    while ((parseRows = UnstructuredStorageReaderUtil
+					    .splitBufferedReader(csvReader)) != null) {
+				    UnstructuredStorageReaderUtil.transportOneRecord(recordSender,
+						    column, parseRows, nullFormat, taskPluginCollector);
+			    }
+            }else {
+                while ((parseRows = UnstructuredStorageReaderUtil
+                        .splitBufferedReader(csvReader)) != null) {
+                    for(int i=0;i<parseRows.length;i++) {
+                        parseRows[i] = new String(Base64.decodeBase64(parseRows[i]),"utf8");
+                    }
+                    UnstructuredStorageReaderUtil.transportOneRecord(recordSender,
+                            column, parseRows, nullFormat, taskPluginCollector);
+                }
+            }
+
 		} catch (UnsupportedEncodingException uee) {
 			throw DataXException
 					.asDataXException(
