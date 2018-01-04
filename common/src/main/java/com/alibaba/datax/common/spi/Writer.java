@@ -27,8 +27,7 @@ public abstract class Writer extends BaseObject {
 		 * 
 		 * */
 		public abstract List<Configuration> split(int mandatoryNumber);
-
-    }
+	}
 
 	/**
 	 * 每个Writer插件必须实现Task内部类

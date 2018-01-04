@@ -1,11 +1,13 @@
 package com.alibaba.datax.plugin.rdbms.writer;
 
+import com.alibaba.datax.common.constant.PluginType;
 import com.alibaba.datax.common.element.Column;
 import com.alibaba.datax.common.element.Record;
 import com.alibaba.datax.common.exception.DataXException;
 import com.alibaba.datax.common.plugin.RecordReceiver;
 import com.alibaba.datax.common.plugin.TaskPluginCollector;
 import com.alibaba.datax.common.util.Configuration;
+import com.alibaba.datax.core.util.container.LoadUtil;
 import com.alibaba.datax.plugin.rdbms.util.DBUtil;
 import com.alibaba.datax.plugin.rdbms.util.DBUtilErrorCode;
 import com.alibaba.datax.plugin.rdbms.util.DataBaseType;
@@ -19,6 +21,14 @@ import org.postgresql.copy.CopyManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.postgresql.PGConnection;
+import org.postgresql.copy.CopyManager;
+import java.io.*;
+import java.io.File;
+import java.io.FileReader;
+
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
@@ -298,7 +308,7 @@ public class CommonRdbmsWriter {
                             try{
                                     LOG.info(String.format("Load sql: %s.", writeRecordSql));
 
-                                    localInputStream = new PostgreWriterInputStreamAdapter(recordReceiver);
+                                    localInputStream = new PostgreWriterInputStreamAdapter(recordReceiver,this.resultSetMetaData);
                                     CopyManager copyManager = connection.unwrap(PGConnection.class).getCopyAPI();
                                     copyManager.copyIn(writeRecordSql,localInputStream);
 

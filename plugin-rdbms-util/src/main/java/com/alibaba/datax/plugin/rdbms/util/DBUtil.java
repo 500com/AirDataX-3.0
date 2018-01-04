@@ -1,12 +1,16 @@
 package com.alibaba.datax.plugin.rdbms.util;
 
 import com.alibaba.datax.common.exception.DataXException;
+import com.alibaba.datax.common.spi.ErrorCode;
 import com.alibaba.datax.common.util.Configuration;
+import com.alibaba.datax.common.util.ListUtil;
 import com.alibaba.datax.common.util.RetryUtil;
+import com.alibaba.datax.core.util.container.JarLoader;
 import com.alibaba.datax.plugin.rdbms.reader.Key;
 import com.alibaba.druid.sql.parser.SQLParserUtils;
 import com.alibaba.druid.sql.parser.SQLStatementParser;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
+
 import org.apache.commons.lang.StringEscapeUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.ImmutableTriple;
@@ -15,6 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
+import java.net.URL;
 import java.sql.*;
 import java.util.*;
 import java.util.concurrent.*;

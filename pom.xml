@@ -13,7 +13,7 @@
         </dependency>
     </dependencies>
 
-    <name>datax-3.0</name>
+    <name>datax-all</name>
     <packaging>pom</packaging>
 
     <properties>
@@ -40,57 +40,57 @@
     </properties>
 
     <modules>
-        <!--<module>common</module>-->
-        <!--<module>core</module>-->
-        <!--<module>transformer</module>-->
+        <module>common</module>
+        <module>core</module>
+        <module>transformer</module>
 
         <!-- reader -->
-        <!--<module>mysqlreader</module>-->
-        <!--<module>drdsreader</module>-->
-        <!--<module>sqlserverreader</module>-->
-        <!--<module>postgresqlreader</module>-->
-        <!--<module>oraclereader</module>-->
-        <!--<module>odpsreader</module>-->
-        <!--<module>otsreader</module>-->
-        <!--<module>txtfilereader</module>-->
-        <!--<module>hdfsreader</module>-->
-        <!--<module>streamreader</module>-->
-        <!--<module>hbasereader</module>-->
-        <!--<module>ossreader</module>-->
-        <!--<module>ftpreader</module>-->
-        <!--<module>mongodbreader</module>-->
-        <!--<module>rdbmsreader</module>-->
-        <!--<module>hbase11xreader</module>-->
-        <!--<module>hbase094xreader</module>-->
-        <!--<module>hivereader</module>-->
+        <module>mysqlreader</module>
+        <module>drdsreader</module>
+        <module>sqlserverreader</module>
+        <module>postgresqlreader</module>
+        <module>oraclereader</module>
+        <module>odpsreader</module>
+        <module>otsreader</module>
+        <module>txtfilereader</module>
+        <module>hdfsreader</module>
+        <module>streamreader</module>
+        <module>hbasereader</module>
+        <module>ossreader</module>
+        <module>ftpreader</module>
+        <module>mongodbreader</module>
+        <module>rdbmsreader</module>
+        <module>hbase11xreader</module>
+        <module>hbase094xreader</module>
+        <module>hivereader</module>
 
-        <!--&lt;!&ndash; writer &ndash;&gt;-->
-        <!--<module>mysqlwriter</module>-->
-        <!--<module>drdswriter</module>-->
-        <!--<module>odpswriter</module>-->
-        <!--<module>txtfilewriter</module>-->
-        <!--<module>ftpwriter</module>-->
-        <!--<module>hdfswriter</module>-->
-        <!--<module>streamwriter</module>-->
-        <!--<module>otswriter</module>-->
-        <!--<module>oraclewriter</module>-->
-        <!--<module>sqlserverwriter</module>-->
-        <!--<module>postgresqlwriter</module>-->
-        <!--<module>osswriter</module>-->
-        <!--<module>mongodbwriter</module>-->
-        <!--<module>adswriter</module>-->
-        <!--<module>ocswriter</module>-->
-        <!--<module>rdbmswriter</module>-->
-        <!--<module>hbase11xwriter</module>-->
-        <!--<module>hbase094xwriter</module>-->
+        <!-- writer -->
+        <module>mysqlwriter</module>
+        <module>drdswriter</module>
+        <module>odpswriter</module>
+        <module>txtfilewriter</module>
+        <module>ftpwriter</module>
+        <module>hdfswriter</module>
+        <module>streamwriter</module>
+        <module>otswriter</module>
+        <module>oraclewriter</module>
+        <module>sqlserverwriter</module>
+        <module>postgresqlwriter</module>
+        <module>osswriter</module>
+        <module>mongodbwriter</module>
+        <module>adswriter</module>
+        <module>ocswriter</module>
+        <module>rdbmswriter</module>
+        <module>hbase11xwriter</module>
+        <module>hbase094xwriter</module>
+
 
         <!-- some support module -->
         <module>plugin-rdbms-util</module>
         <module>plugin-unstructured-storage-util</module>
         <!-- developing module -->
         <module>hbasewriter</module>
-        <module>extexwriter</module>
-    </modules>
+  </modules>
 
     <dependencyManagement>
         <dependencies>
@@ -193,14 +193,6 @@
                     <source>1.6</source>
                     <target>1.6</target>
                     <encoding>${project-sourceEncoding}</encoding>
-                </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <version>2.10</version>
-                <configuration>
-                    <skip>true</skip>
                 </configuration>
             </plugin>
         </plugins>

@@ -18,6 +18,7 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.net.*;
 import java.sql.Connection;
 import java.util.List;
 
@@ -123,6 +124,13 @@ import java.util.List;
 
         @Override
         public void startRead(RecordSender recordSender) {
+
+            //Socket socket = new Socket();
+            //socket.setSoTimeout(60000);
+
+
+
+
             int fetchSize = this.readerSliceConfig.getInt(Constant.FETCH_SIZE);
             this.commonRdbmsReaderTask.startRead(this.readerSliceConfig, recordSender,
                     super.getTaskPluginCollector(), fetchSize);
